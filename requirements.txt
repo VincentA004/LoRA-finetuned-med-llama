@@ -1,0 +1,12 @@
+transformers
+peft
+datasets
+torch
+accelerate
+onnx
+onnxruntime
+optimum
+scikit-learn
+fastapi
+uvicorn
+streamlit
