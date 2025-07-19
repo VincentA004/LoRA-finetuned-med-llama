@@ -1,7 +1,7 @@
 # End-to-End LoRA Fine-Tuning Pipeline for Medical LLMs
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-blue)](https://huggingface.co/models)
 
 This repository contains a complete, end-to-end MLOps pipeline for fine-tuning, evaluating, and deploying a language model for medical code prediction. The project utilizes Meta's **Llama 3 8B Instruct** model and fine-tunes it on the `FiscaAI/synth-ehr-icd10cm-prompt` dataset to assist with clinical coding tasks.
@@ -28,7 +28,7 @@ To run the pipeline, first ensure you have **Git**, **Python 3.9+**, and **make*
 
 **1. Clone the Repository**
 ```bash
-git clone [https://github.com/your-username/lora-finetuned-med-llama.git](https://github.com/your-username/lora-finetuned-med-llama.git)
+git clone https://github.com/your-username/lora-finetuned-med-llama.git
 
 cd lora-finetuned-med-llama
 ```
