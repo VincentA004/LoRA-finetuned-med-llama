@@ -62,6 +62,57 @@ The `Makefile` provides several commands to manage the project lifecycle:
 | `make publish`               | Pushes the final model artifacts to the Hugging Face Hub.                  |
 | `make clean`                 | Deletes all generated model files, caches, and the virtual environment.    |
 
+## Technical Details
+
+This section provides a deeper look into the libraries and techniques used to build this pipeline.
+
+### The Hugging Face Ecosystem
+
+The project's efficiency and power stem from the tight integration of several key Hugging Face libraries:
+
+-   **`peft` (Parameter-Efficient Fine-Tuning)**: We employ LoRA (Low-Rank Adaptation) via `peft`. Instead of fine-tuning all 8 billion parameters, LoRA posits that the change in weights (${\Delta}W$) during adaptation has a low intrinsic rank. It therefore decomposes this change into two smaller, low-rank matrices (${\Delta}W = BA$), where only A and B are trained. This reduces the trainable parameter count by over 99%. We specifically use **QLoRA**, which further optimizes memory by loading the frozen base model in a 4-bit `NormalFloat` (NF4) data type, making it feasible to fine-tune on consumer hardware.
+-   **`trl` (Transformer Reinforcement Learning)**: The `SFTTrainer` from `trl` is leveraged for Supervised Fine-Tuning. It automates the complex process of packing sequences to their maximum length, correctly formatting the conversational dataset using the Llama 3 chat template, and managing the causal language modeling training loop.
+-   **`accelerate` & `bitsandbytes`**: This pair forms the backbone of the QLoRA process. `accelerate` handles abstract device placement (`device_map="auto"`) for CPU, GPU, or Apple Silicon (MPS) environments, while `bitsandbytes` provides the underlying CUDA or CPU kernels for 4-bit quantization and the memory-efficient `paged_adamw_32bit` optimizer.
+
+### GGUF Export and Quantization
+
+To enable high-performance inference on consumer CPUs, the model is exported to GGUF for the `llama.cpp` ecosystem.
+
+-   **Format**: GGUF is a single-file binary format that contains the model architecture, vocabulary, and quantized weights. This self-contained design allows for extremely fast, memory-mapped model loading.
+-   **Quantization Strategy**: The pipeline defaults to **`Q4_K_M`** quantization. This is a sophisticated 4.5 bits-per-weight "K-Quant" method from `llama.cpp`. Unlike older quantization schemes, K-Quants use larger block sizes (256) and improved quantization scales, resulting in significantly better perplexity (lower quality loss) for a given file size. The 'M' variant denotes a 'medium' model size and quality level within its group.
+
+### ONNX Export for Production
+
+For platform-agnostic and high-throughput deployment, the model is converted to the ONNX (Open Neural Network Exchange) format.
+
+-   **Process**: The `optimum` library traces the PyTorch model's forward pass to build a static, hardware-agnostic computation graph. This decouples the model from the Python/PyTorch framework.
+-   **Performance**: When executed with the **ONNX Runtime**, this static graph enables powerful optimizations not possible in a dynamic environment. Techniques like **graph fusion** (merging sequential operations like matrix multiplication and bias addition into a single kernel), constant folding, and operator elimination are applied. The runtime then targets hardware-specific execution providers (e.g., CUDA, TensorRT) for maximum performance, achieving significantly lower latency.
+
+### Model Quantization
+
+The pipeline supports multiple quantization strategies to optimize the model for different performance targets.
+
+#### GGUF Quantization
+
+The `llama.cpp` ecosystem provides a rich set of quantization methods. The desired GGUF quantization level can be easily changed by modifying the `export` command in the `Makefile` or by running the `export_model.py` script with a different `--quantize` flag.
+
+While the default is **`Q4_K_M`**, you can generate other versions for different trade-offs:
+-   **`Q8_0`**: An 8-bit quantization for near-lossless quality.
+-   **`Q5_K_M`**: A 5-bit k-quant for a slight quality improvement over 4-bit.
+-   **`Q2_K`**: A 2-bit k-quant for maximum compression and speed on resource-constrained devices.
+
+#### ONNX Quantization (INT8 vs. UINT8)
+
+ONNX quantization is typically performed as a post-export step using the **ONNX Runtime** library. The most common method is **Dynamic Quantization**, where model weights are converted to a lower precision integer format offline, while activations are quantized on-the-fly during inference.
+
+The choice between `INT8` and `UINT8` for weights is critical:
+
+-   **`INT8` (Signed 8-bit Integer)**: This format represents values from -128 to 127. It is the **standard and recommended choice for LLM weights**, as the weights are typically distributed symmetrically around zero (both positive and negative values). Using `INT8` accurately preserves this distribution, leading to better model performance post-quantization.
+
+-   **`UINT8` (Unsigned 8-bit Integer)**: This format represents values from 0 to 255. It is generally used for quantizing model activations that are always non-negative (e.g., the output of a ReLU activation function). Using it for weights that are centered around zero can introduce a quantization bias and degrade model accuracy.
+
+For this project, `INT8` dynamic quantization is the appropriate method for optimizing the ONNX model.
+
 
 ## Deployment
 
