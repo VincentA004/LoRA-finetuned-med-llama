@@ -48,7 +48,7 @@ This single command will run the entire training and exporting pipeline sequenti
 make all
 ```
 
-## Available Commands
+#### Available Commands
 
 The `Makefile` provides several commands to manage the project lifecycle:
 
