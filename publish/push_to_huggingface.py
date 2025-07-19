@@ -1,72 +1,65 @@
-import os
+
 import argparse
+import os
+from pathlib import Path
+
 from huggingface_hub import HfApi, HfFolder
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
 
-def push_lora_adapter(lora_path, repo_id, private):
-    print(f"Pushing LoRA adapter from: {lora_path}")
-    model = PeftModel.from_pretrained(lora_path)
-    model.push_to_hub(repo_id, private=private)
-    print("✅ LoRA adapter pushed.")
+# Import settings from the centralized configuration file
+import src.config as config
 
-def push_merged_model(merged_path, repo_id, private):
-    print(f"Pushing merged model from: {merged_path}")
-    model = AutoModelForCausalLM.from_pretrained(merged_path)
-    model.push_to_hub(repo_id, private=private)
-    print("✅ Merged model pushed.")
-
-def push_tokenizer(tokenizer_path, repo_id, private):
-    print(f"Pushing tokenizer from: {tokenizer_path}")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-    tokenizer.push_to_hub(repo_id, private=private)
-    print("✅ Tokenizer pushed.")
-
-def push_gguf_file(gguf_path, repo_id, hf_token):
-    if gguf_path and os.path.exists(gguf_path):
-        print(f"Pushing GGUF file from: {gguf_path}")
-        api = HfApi()
-        filename = os.path.basename(gguf_path)
-        api.upload_file(
-            path_or_fileobj=gguf_path,
-            path_in_repo=filename,
-            repo_id=repo_id,
-            repo_type="model",
-            token=hf_token,
-        )
-        print("✅ GGUF file uploaded.")
-    else:
-        print("⚠️ No GGUF file provided or path does not exist. Skipping.")
 
 def get_hf_token(cli_token: str = None) -> str:
-    return (
-        cli_token or
-        os.getenv("HF_TOKEN") or
-        HfFolder.get_token()
-    )
+    """Retrieves the Hugging Face token from CLI, environment variables, or cache."""
+    token = cli_token or os.getenv("HF_TOKEN") or HfFolder.get_token()
+    if not token:
+        raise ValueError("Hugging Face token not found. Please log in via `huggingface-cli login` or pass with --hf-token.")
+    return token
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Push all model artifacts to Hugging Face Hub.")
-    parser.add_argument("--hf-repo-name", required=True, help="Name of the Hugging Face model repo")
-    parser.add_argument("--hf-org", required=True, help="Your Hugging Face organization or username")
-    parser.add_argument("--lora-path", required=True, help="Path to saved LoRA adapter folder")
-    parser.add_argument("--merged-path", required=True, help="Path to merged model folder")
-    parser.add_argument("--tokenizer-path", required=True, help="Path to tokenizer")
-    parser.add_argument("--gguf-path", help="Path to GGUF file (optional)")
-    parser.add_argument("--hf-token", help="Hugging Face token (optional)")
-    parser.add_argument("--private", action="store_true", help="Upload model privately")
-
+    parser = argparse.ArgumentParser(
+        description="Push model artifacts to the Hugging Face Hub.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("--repo-name", default=config.HF_REPO_NAME, help="Name of the Hugging Face model repo.")
+    parser.add_argument("--hf-org", default=config.HF_ORG_NAME, help="Your Hugging Face organization or username.")
+    parser.add_argument("--hf-token", help="Hugging Face API token (optional).")
+    parser.add_argument("--private", action="store_true", help="Upload the model as a private repository.")
+    
     args = parser.parse_args()
+    
     hf_token = get_hf_token(args.hf_token)
-    repo_id = f"{args.hf_org}/{args.hf_repo_name}"
+    repo_id = f"{args.hf_org}/{args.repo_name}"
+    
+    api = HfApi(token=hf_token)
+    
+    print(f"↗️  Creating repository {repo_id} on Hugging Face Hub...")
+    api.create_repo(repo_id=repo_id, repo_type="model", exist_ok=True, private=args.private)
+    
+    # --- Upload Merged Model ---
+    print(f"📤 Uploading merged model from {config.MERGED_MODEL_PATH}...")
+    api.upload_folder(
+        folder_path=config.MERGED_MODEL_PATH,
+        repo_id=repo_id,
+        repo_type="model",
+        commit_message="feat: Add merged model weights and tokenizer"
+    )
+    
+    # --- Upload GGUF Files ---
+    gguf_dir = Path(config.GGUF_OUTPUT_DIR)
+    if gguf_dir.exists():
+        print(f"📤 Uploading GGUF models from {gguf_dir}...")
+        api.upload_folder(
+            folder_path=gguf_dir,
+            repo_id=repo_id,
+            repo_type="model",
+            allow_patterns="*.gguf",
+            commit_message="feat: Add GGUF quantized models"
+        )
 
-    print(f"📤 Uploading to: https://huggingface.co/{repo_id}")
-    push_lora_adapter(args.lora_path, repo_id, args.private)
-    push_merged_model(args.merged_path, repo_id, args.private)
-    push_tokenizer(args.tokenizer_path, repo_id, args.private)
-    push_gguf_file(args.gguf_path, repo_id, hf_token)
+    print(f"\n🎉 Successfully uploaded artifacts to: https://huggingface.co/{repo_id}")
 
-    print("🎉 All uploads completed successfully.")
 
 if __name__ == "__main__":
     main()

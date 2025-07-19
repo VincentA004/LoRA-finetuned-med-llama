@@ -1,5 +1,4 @@
-import os
-import torch
+
 from datasets import load_dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -14,50 +13,47 @@ from peft import (
 )
 from trl import SFTTrainer, setup_chat_format
 
-
-# === CONFIG ===
-BASE_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
-DATASET_NAME = "FiscaAI/synth-ehr-icd10cm-prompt"
-OUTPUT_DIR = "models/llama3-lora-icd"
-NUM_SAMPLES = 3000
-EPOCHS = 1
-MAX_SEQ_LEN = 512
-
-peft_config = LoraConfig(
-    r=16,
-    lora_alpha=32,
-    lora_dropout=0.05,
-    target_modules=[
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "up_proj", "down_proj", "gate_proj"
-    ],
-    bias="none",
-    task_type="CAUSAL_LM"
-)
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-)
+# Import settings from the centralized configuration file
+import src.config as config
 
 def main():
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, trust_remote_code=True)
+    # Load the tokenizer for the base model
+    tokenizer = AutoTokenizer.from_pretrained(config.BASE_MODEL_NAME, trust_remote_code=True)
+    
+    # Configure quantization with BitsAndBytes
+    bnb_config = BitsAndBytesConfig(**config.BNB_CONFIG)
+
+    # Load the base model with the specified quantization config
     model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
+        config.BASE_MODEL_NAME,
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
     )
+    
+    # Set up chat formatting and prepare the model for k-bit training
     model, tokenizer = setup_chat_format(model, tokenizer)
     model = prepare_model_for_kbit_training(model)
+    
+    # Configure LoRA
+    peft_config = LoraConfig(
+        r=config.LORA_R,
+        lora_alpha=config.LORA_ALPHA,
+        lora_dropout=config.LORA_DROPOUT,
+        target_modules=config.LORA_TARGET_MODULES,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
     model = get_peft_model(model, peft_config)
+    
+    # Print a summary of the trainable parameters
     model.print_trainable_parameters()
-
-    ds = load_dataset(DATASET_NAME, split="train")
-    ds = ds.shuffle(seed=42).select(range(NUM_SAMPLES))
-
+    
+    # Load and prepare the dataset
+    ds = load_dataset(config.DATASET_NAME, split="train")
+    ds = ds.shuffle(seed=42).select(range(config.NUM_SAMPLES))
+    
+    # Helper function to format the dataset examples into a chat template
     def format_example(example):
         messages = [
             {"role": "user", "content": example["prompt"]},
@@ -65,25 +61,18 @@ def main():
         ]
         example["text"] = tokenizer.apply_chat_template(messages, tokenize=False)
         return example
-
+    
     ds = ds.map(format_example, num_proc=4)
     ds = ds.train_test_split(test_size=0.1)
-
+    
+    # Configure training arguments
     training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=2,
-        learning_rate=2e-4,
-        num_train_epochs=EPOCHS,
-        evaluation_strategy="steps",
-        eval_steps=100,
-        logging_steps=10,
-        save_strategy="epoch",
-        fp16=True,
-        optim="paged_adamw_32bit",
-        report_to="none",
+        output_dir=config.LORA_ADAPTER_PATH,
+        num_train_epochs=config.NUM_TRAIN_EPOCHS,
+        **config.TRAINING_ARGS,
     )
-
+    
+    # Initialize the SFTTrainer
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -91,15 +80,21 @@ def main():
         eval_dataset=ds["test"],
         args=training_args,
         peft_config=peft_config,
-        max_seq_length=MAX_SEQ_LEN,
+        max_seq_length=config.MAX_SEQ_LENGTH,
         dataset_text_field="text",
         packing=False,
     )
-
+    
+    # Start the training process
+    print("Starting model training...")
     trainer.train()
-    trainer.model.save_pretrained(OUTPUT_DIR)
-    tokenizer.save_pretrained(OUTPUT_DIR)
-    print(f" Training complete. Model saved to {OUTPUT_DIR}")
+    
+    # Save the trained model adapter and tokenizer
+    print(f"Saving LoRA adapter to {config.LORA_ADAPTER_PATH}...")
+    trainer.model.save_pretrained(config.LORA_ADAPTER_PATH)
+    tokenizer.save_pretrained(config.LORA_ADAPTER_PATH)
+    
+    print(f"Training complete. Model adapter saved to {config.LORA_ADAPTER_PATH}")
 
 if __name__ == "__main__":
     main()
