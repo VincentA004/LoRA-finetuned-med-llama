@@ -4,7 +4,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-blue)](https://huggingface.co/models)
 
-This repository contains a complete, end-to-end MLOps pipeline for fine-tuning, evaluating, and deploying a language model for medical code prediction. The project utilizes Meta's **Llama 3 8B Instruct** model and fine-tunes it on the `FiscaAI/synth-ehr-icd10cm-prompt` dataset to assist with clinical coding tasks.
+This repository contains a complete, end-to-end LLMOps pipeline for fine-tuning, evaluating, and deploying a language model for medical code prediction. The project utilizes Meta's **Llama 3 8B Instruct** model and fine-tunes it on the `FiscaAI/synth-ehr-icd10cm-prompt` dataset to assist with clinical coding tasks.
 
 The entire workflow is automated and containerized, demonstrating best practices for creating reproducible and production-ready machine learning systems. It covers the full lifecycle from training with LoRA to exporting the model in efficient formats like GGUF and ONNX for flexible deployment.
 
